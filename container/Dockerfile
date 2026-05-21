@@ -1,7 +1,7 @@
 FROM docker.io/cloudflare/sandbox:0.10.1
 # Pin tag to exactly match @cloudflare/sandbox in package.json. :latest does not exist.
 
-ARG CACHEBUST=2
+ARG CACHEBUST=3
 # Bump CACHEBUST whenever agent-script.mjs changes to force a rebuild.
 
 WORKDIR /workspace

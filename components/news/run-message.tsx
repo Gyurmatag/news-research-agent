@@ -34,7 +34,7 @@ export function RunMessage({
   return (
     <Message from="assistant" className="max-w-full">
       <MessageContent className="w-full max-w-full">
-        {snapshot.timeline.map((item) => {
+        {snapshot.timeline.map((item, idx) => {
           if (item.kind === "text") {
             if (item.content.trim() === "") return null;
             return (
@@ -45,8 +45,19 @@ export function RunMessage({
           }
           if (item.kind === "reasoning") {
             if (item.content.trim() === "") return null;
+            // Only the most recent reasoning item shows the streaming
+            // "Thinking…" indicator; earlier turns are settled.
+            const isLastReasoning =
+              snapshot.timeline.findIndex(
+                (t, i) => i > idx && t.kind === "reasoning",
+              ) === -1;
+            const isStreaming = snapshot.status === "running" && isLastReasoning;
             return (
-              <Reasoning key={`reasoning-${item.id}`} isStreaming={snapshot.status === "running"}>
+              <Reasoning
+                key={`reasoning-${item.id}`}
+                isStreaming={isStreaming}
+                defaultOpen={isStreaming}
+              >
                 <ReasoningTrigger />
                 <ReasoningContent>{item.content}</ReasoningContent>
               </Reasoning>

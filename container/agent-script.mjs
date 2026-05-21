@@ -213,13 +213,18 @@ async function run() {
       if (message.type === "stream_event") {
         const ev = message.event;
         if (!ev || typeof ev !== "object") continue;
-        const blockId = `${message.uuid}-${ev.index ?? 0}`;
+        const textId = `${message.uuid}-${ev.index ?? 0}`;
+        // Reasoning is grouped per assistant message (turn) so that multiple
+        // thinking blocks interleaved with tool calls in the same turn show as
+        // a single collapsible "Thinking" panel in the UI instead of several
+        // disconnected ones.
+        const reasoningId = `${message.uuid}-thinking`;
         if (ev.type === "content_block_delta" && ev.delta) {
           if (ev.delta.type === "text_delta" && typeof ev.delta.text === "string") {
-            textBlockIds.set(blockId, true);
-            emit({ type: "assistant_text_delta", id: blockId, delta: ev.delta.text });
+            textBlockIds.set(textId, true);
+            emit({ type: "assistant_text_delta", id: textId, delta: ev.delta.text });
           } else if (ev.delta.type === "thinking_delta" && typeof ev.delta.thinking === "string") {
-            emit({ type: "reasoning_delta", id: `${blockId}-thinking`, delta: ev.delta.thinking });
+            emit({ type: "reasoning_delta", id: reasoningId, delta: ev.delta.thinking });
           }
         }
         // ignore message_start/content_block_start/content_block_stop/message_delta — usage
