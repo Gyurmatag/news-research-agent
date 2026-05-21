@@ -1,12 +1,15 @@
-import { Sandbox } from "@cloudflare/sandbox";
+import { Sandbox, parseSSEStream } from "@cloudflare/sandbox";
 import { drizzle, type DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
-import { gt } from "drizzle-orm";
+import { drizzle as drizzleD1 } from "drizzle-orm/d1";
+import { gt, eq } from "drizzle-orm";
 import { events } from "./db/do-schema";
+import { runs } from "./db/schema";
 import type { Env } from "./env";
 import type { AgentEvent, EvalSummary } from "../lib/agent-events";
 import { MAX_USD_PER_RUN } from "../lib/cost";
 import { withExcelPrefix } from "../lib/csv";
 import { JsonlBuffer } from "../lib/jsonl-buffer";
+import { runEval, type ToolTrace } from "./eval";
 import {
   encodeUIPart,
   finishParts,
@@ -263,6 +266,7 @@ export class AgentSandbox extends Sandbox<Env> {
 
   private async executeRun(payload: StartRunPayload) {
     try {
+      console.log(`[run ${payload.runId}] executeRun starting (mcp=${payload.mcpEnabled})`);
       await this.setEnvVars({
         ANTHROPIC_API_KEY: payload.anthropicKey,
         TAVILY_API_KEY: payload.tavilyKey,
@@ -272,6 +276,19 @@ export class AgentSandbox extends Sandbox<Env> {
         USER_QUERY: payload.query,
         MCP_ENABLED: payload.mcpEnabled ? "true" : "false",
       });
+      console.log(`[run ${payload.runId}] envVars set, starting process`);
+
+      // Persist a run_init so it can be replayed to late subscribers.
+      await this.persistEvent(
+        JSON.stringify({
+          type: "run_init",
+          runId: payload.runId,
+          query: payload.query,
+          mcpEnabled: payload.mcpEnabled,
+          model: payload.model,
+          timestamp: Date.now(),
+        } satisfies AgentEvent),
+      );
 
       // Start the agent process. It writes one JSON event per line to stdout.
       const proc = await this.startProcess("node /workspace/agent-script.mjs", {
@@ -285,17 +302,20 @@ export class AgentSandbox extends Sandbox<Env> {
           TAVILY_API_KEY: payload.tavilyKey,
         },
       });
+      console.log(`[run ${payload.runId}] process started id=${proc.id}, opening log stream`);
 
       this.logsAbort = new AbortController();
       const logStream = await this.streamProcessLogs(proc.id, {
         signal: this.logsAbort.signal,
       });
+      console.log(`[run ${payload.runId}] log stream open, consuming`);
       await this.consumeAgentStream(logStream, payload);
+      console.log(`[run ${payload.runId}] stream consumed, uploading R2`);
       await this.uploadResultsToR2(payload.runId);
       this.latestStatus = this.latestStatus === "aborted" ? "aborted" : "completed";
 
-      // Persist completion + queue eval. RunEval is triggered by the worker route
-      // (which has access to D1 + AI SDK) — the DO emits run_complete and waits.
+      await this.updateRunRowToCompleted(payload.runId);
+
       const completeEvent: AgentEvent = {
         type: "run_complete",
         totalUsd: this.currentTotalUsd,
@@ -303,12 +323,56 @@ export class AgentSandbox extends Sandbox<Env> {
         durationMs: Date.now() - this.runStartedAt,
       };
       await this.persistEvent(JSON.stringify(completeEvent));
+      console.log(`[run ${payload.runId}] complete, totalUsd=${this.currentTotalUsd} bytes=${this.currentOutputBytes}`);
+
+      // Auto-run the 4-layer eval. Failures are surfaced as agent_error events but
+      // do NOT mark the overall run as failed (the agent already finished).
+      try {
+        const trace = await this.listToolStartsBeforeFirstWrite();
+        const summary = await runEval(this.env, payload.runId, trace);
+        if (summary) {
+          await this.recordEvalSummary(summary);
+        }
+        console.log(`[run ${payload.runId}] eval done pass=${summary?.overallPass}`);
+      } catch (err) {
+        const message = String((err as Error)?.message ?? err);
+        console.error(`[run ${payload.runId}] eval failed: ${message}`);
+        await this.persistEvent(
+          JSON.stringify({
+            type: "agent_error",
+            message: `Eval failed: ${message}`,
+          } satisfies AgentEvent),
+        );
+      }
     } catch (err) {
       const message = String((err as Error)?.message ?? err);
+      const stack = (err as Error)?.stack ?? "";
+      console.error(`[run ${payload.runId}] FAILED: ${message}\n${stack}`);
       this.latestStatus = "failed";
       await this.persistEvent(JSON.stringify({ type: "agent_error", message } satisfies AgentEvent));
+      try {
+        const d1 = drizzleD1(this.env.DB);
+        await d1.update(runs).set({ status: "failed", errorMessage: message, completedAt: Date.now() }).where(eq(runs.id, payload.runId));
+      } catch {}
     } finally {
       this.flushFinishToAll();
+    }
+  }
+
+  private async updateRunRowToCompleted(runId: string) {
+    try {
+      const d1 = drizzleD1(this.env.DB);
+      await d1
+        .update(runs)
+        .set({
+          status: this.latestStatus === "aborted" ? "aborted" : "completed",
+          costUsd: this.currentTotalUsd,
+          outputKey: this.currentOutputBytes > 0 ? `${runId}/results.csv` : null,
+          completedAt: Date.now(),
+        })
+        .where(eq(runs.id, runId));
+    } catch (err) {
+      console.error(`[run ${runId}] failed to update D1 row:`, err);
     }
   }
 
@@ -316,47 +380,51 @@ export class AgentSandbox extends Sandbox<Env> {
     logStream: ReadableStream<Uint8Array>,
     payload: StartRunPayload,
   ) {
-    const reader = logStream.getReader();
-    const decoder = new TextDecoder();
-    const jsonl = new JsonlBuffer<AgentEvent | Record<string, unknown>>();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const text = decoder.decode(value, { stream: true });
-      // The sandbox stream wraps each chunk in JSON like {type:'stdout',data:'...'}.
-      // We tolerate both raw NDJSON and the wrapped form by extracting the inner data
-      // before JSONL-buffering it.
-      const lines = text.split("\n");
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        let payloadText = trimmed;
-        try {
-          const wrapped = JSON.parse(trimmed) as {
-            type?: string;
-            data?: string;
-            stream?: string;
-          };
-          if (
-            wrapped &&
-            typeof wrapped === "object" &&
-            typeof wrapped.data === "string" &&
-            (wrapped.type === "stdout" || wrapped.stream === "stdout" || wrapped.type === "log")
-          ) {
-            payloadText = wrapped.data;
-          }
-        } catch {
-          // Not a JSON wrapper; use the line as-is.
+    // streamProcessLogs() returns an SSE stream where each event has the shape
+    // { type: "stdout" | "stderr" | "process_info" | "process_exit", data?: string, ... }.
+    // Stdout from the agent script is JSONL; we feed it through JsonlBuffer to
+    // reconstruct AgentEvents across chunk boundaries.
+    const jsonl = new JsonlBuffer<AgentEvent>();
+    const errBuf: string[] = [];
+    let events = 0;
+    type ProcEvent = {
+      type?: string;
+      data?: string;
+      exitCode?: number;
+      processId?: string;
+    };
+    for await (const event of parseSSEStream<ProcEvent>(logStream)) {
+      events++;
+      if (events <= 3) {
+        console.log(
+          `[run ${payload.runId}] sse #${events} type=${event?.type} dataLen=${event?.data?.length ?? 0}`,
+        );
+      }
+      if (!event) continue;
+      if (event.type === "stdout" && typeof event.data === "string") {
+        const parsed = jsonl.push(event.data);
+        for (const ev of parsed) {
+          await this.handleAgentEvent(ev, payload);
         }
-        const parsedEvents = jsonl.push(payloadText + "\n");
-        for (const ev of parsedEvents) {
-          await this.handleAgentEvent(ev as AgentEvent, payload);
+      } else if (event.type === "stderr" && typeof event.data === "string") {
+        errBuf.push(event.data);
+        if (errBuf.length <= 5) {
+          console.log(`[run ${payload.runId}] stderr: ${event.data.slice(0, 200)}`);
         }
+      } else if (event.type === "process_exit") {
+        console.log(
+          `[run ${payload.runId}] process_exit exitCode=${event.exitCode ?? "n/a"}`,
+        );
       }
     }
     for (const ev of jsonl.flush()) {
-      await this.handleAgentEvent(ev as AgentEvent, payload);
+      await this.handleAgentEvent(ev, payload);
     }
+    if (errBuf.length > 0) {
+      const sample = errBuf.join("").slice(-1000);
+      console.log(`[run ${payload.runId}] stderr tail: ${sample}`);
+    }
+    console.log(`[run ${payload.runId}] sse stream done, total events=${events}`);
   }
 
   private async handleAgentEvent(event: AgentEvent, payload: StartRunPayload) {
@@ -423,14 +491,10 @@ export class AgentSandbox extends Sandbox<Env> {
     this.flushFinishToAll();
   }
 
-  async listToolStartsBeforeFirstWrite(): Promise<{
-    toolsUsed: string[];
-    searchBeforeWrite: boolean;
-    writeSeen: boolean;
-  }> {
+  async listToolStartsBeforeFirstWrite(): Promise<ToolTrace> {
     const db = await this.ensureDb();
     const rows = await db.select().from(events).orderBy(events.seq);
-    const toolsUsed: string[] = [];
+    const orderedToolStarts: string[] = [];
     let writeSeen = false;
     let searchBeforeWrite = false;
     const SEARCH_TOOLS = new Set([
@@ -443,7 +507,7 @@ export class AgentSandbox extends Sandbox<Env> {
       try {
         const ev = JSON.parse(row.payload) as AgentEvent;
         if (ev.type === "tool_start") {
-          toolsUsed.push(ev.toolName);
+          orderedToolStarts.push(ev.toolName);
           if (!writeSeen && SEARCH_TOOLS.has(ev.toolName)) {
             searchBeforeWrite = true;
           }
@@ -453,6 +517,11 @@ export class AgentSandbox extends Sandbox<Env> {
         // skip
       }
     }
-    return { toolsUsed: Array.from(new Set(toolsUsed)), searchBeforeWrite, writeSeen };
+    return {
+      toolsUsed: Array.from(new Set(orderedToolStarts)),
+      searchBeforeWrite,
+      writeSeen,
+      orderedToolStarts,
+    };
   }
 }

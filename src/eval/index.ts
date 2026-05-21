@@ -1,7 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../env";
-import type { AgentSandbox } from "../sandbox";
 import { runs, evalResults } from "../db/schema";
 import { stripExcelPrefix } from "../../lib/csv";
 import { runSchemaCheck } from "./schema-check";
@@ -10,10 +9,22 @@ import { runToolTraceCheck } from "./tool-trace-check";
 import { runJudge, JUDGE_PASS_THRESHOLD } from "./judge";
 import type { EvalSummary } from "../../lib/agent-events";
 
+export type ToolTrace = {
+  toolsUsed: string[];
+  searchBeforeWrite: boolean;
+  writeSeen: boolean;
+  orderedToolStarts: string[];
+};
+
+/**
+ * Run the 4-layer evaluator for a run, persist results to D1, and update the runs row.
+ * The caller is responsible for fetching the ordered tool starts (from the DO event log)
+ * and for surfacing the resulting summary back to clients (e.g. via persistEvent).
+ */
 export async function runEval(
   env: Env,
   runId: string,
-  stub: DurableObjectStub<AgentSandbox>,
+  trace: ToolTrace,
 ): Promise<EvalSummary | null> {
   const db = drizzle(env.DB);
   const existing = await db
@@ -35,8 +46,7 @@ export async function runEval(
 
   const schema = runSchemaCheck(csvText);
   const content = runContentCheck(csvText);
-  const trace = await stub.listToolStartsBeforeFirstWrite();
-  const tools = runToolTraceCheck(orderedToolStartsFromTrace(trace));
+  const tools = runToolTraceCheck(trace.orderedToolStarts);
 
   let judgePass = false;
   let judgeScore = 0;
@@ -107,27 +117,11 @@ export async function runEval(
       status: runRow.status === "aborted" ? "aborted" : "completed",
       completedAt: Date.now(),
       outputKey: obj ? `${runId}/results.csv` : null,
+      costUsd: runRow.costUsd,
     })
     .where(eq(runs.id, runId));
 
-  await stub.recordEvalSummary(summary);
   return summary;
-}
-
-function orderedToolStartsFromTrace(trace: {
-  toolsUsed: string[];
-  searchBeforeWrite: boolean;
-  writeSeen: boolean;
-}): string[] {
-  // The DO already pre-computed search-before-write; but the trace-check function expects
-  // an ordered list. We synthesize the order from the boolean signals so the pure check is
-  // re-usable in unit tests with fully ordered input. In production the DO calls
-  // `listToolStartsBeforeFirstWrite` which returns the search/write summary directly.
-  const out: string[] = [];
-  if (trace.searchBeforeWrite) out.push("mcp__tavily__tavily_search");
-  for (const t of trace.toolsUsed) if (!out.includes(t)) out.push(t);
-  if (trace.writeSeen && !out.includes("Write")) out.push("Write");
-  return out;
 }
 
 function summaryFromRow(row: typeof evalResults.$inferSelect): EvalSummary {

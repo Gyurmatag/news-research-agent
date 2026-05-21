@@ -9,9 +9,8 @@ import {
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/components/ai-elements/tool";
 import { EvalVerdictCard } from "./eval-verdict-card";
 import { CostPill } from "./cost-pill";
+import { CsvPreview } from "./csv-preview";
 import type { RunSnapshot } from "./timeline";
-import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
 
 const TOOL_STATE_MAP = {
   "input-streaming": "input-streaming",
@@ -29,6 +28,7 @@ export function RunMessage({
 }) {
   const hasOutput =
     snapshot.status === "completed" || snapshot.status === "aborted" || (snapshot.outputBytes ?? 0) > 0;
+  const showCsv = hasOutput;
   return (
     <Message from="assistant" className="max-w-full">
       <MessageContent className="w-full max-w-full">
@@ -68,6 +68,8 @@ export function RunMessage({
           );
         })}
 
+        {showCsv && <CsvPreview runId={runId} ready={hasOutput} />}
+
         {snapshot.evalSummary && <EvalVerdictCard summary={snapshot.evalSummary} />}
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -89,14 +91,6 @@ export function RunMessage({
             {snapshot.message ? ` — ${snapshot.message}` : ""}
           </span>
           <CostPill totalUsd={snapshot.totalUsd} capUsd={0.5} />
-          {hasOutput && (
-            <Button asChild size="sm" variant="outline" className="ml-auto">
-              <a href={`/api/runs/${runId}/download`} download>
-                <Download className="mr-1.5 size-3.5" />
-                Download CSV
-              </a>
-            </Button>
-          )}
         </div>
       </MessageContent>
     </Message>

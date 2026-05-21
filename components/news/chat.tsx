@@ -9,7 +9,6 @@ import {
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
-  PromptInputBody,
   PromptInputFooter,
   PromptInputProvider,
   PromptInputSubmit,
@@ -160,27 +159,37 @@ function ChatInner() {
         <ConversationScrollButton />
       </Conversation>
       <div className="border-t bg-background/80 backdrop-blur">
-        <div className="mx-auto w-full max-w-2xl p-3">
-          <PromptInput onSubmit={onPromptSubmit}>
-            <PromptInputBody>
-              <PromptInputTextarea placeholder="e.g. Find 5 recent articles about AI safety from the last 7 days" />
-              <PromptInputFooter>
-                <PromptInputTools>
-                  <div className="flex items-center gap-2 rounded-md px-2 py-1">
-                    <Switch
-                      id="mcp-toggle"
-                      checked={mcpEnabled}
-                      onCheckedChange={setMcpEnabled}
-                      disabled={busy}
-                    />
-                    <Label htmlFor="mcp-toggle" className="cursor-pointer text-xs font-medium">
-                      Tavily MCP
-                    </Label>
-                  </div>
-                </PromptInputTools>
-                <PromptInputSubmit status={busy ? "streaming" : "ready"} />
-              </PromptInputFooter>
-            </PromptInputBody>
+        <div className="mx-auto w-full max-w-2xl px-3 py-3 sm:px-4">
+          <PromptInput
+            onSubmit={onPromptSubmit}
+            className="rounded-2xl border border-input bg-background shadow-sm"
+          >
+            <PromptInputTextarea
+              placeholder="Ask for a news brief… e.g. Find 5 recent articles about AI safety from the last 7 days"
+              className="min-h-[3.5rem] resize-none px-4 pt-3 pb-2 text-[15px] leading-relaxed"
+            />
+            <PromptInputFooter className="border-t-0 px-3 pb-3 pt-1">
+              <PromptInputTools>
+                <div className="flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1">
+                  <Switch
+                    id="mcp-toggle"
+                    checked={mcpEnabled}
+                    onCheckedChange={setMcpEnabled}
+                    disabled={busy}
+                  />
+                  <Label
+                    htmlFor="mcp-toggle"
+                    className="cursor-pointer text-xs font-medium"
+                  >
+                    Tavily MCP
+                  </Label>
+                </div>
+              </PromptInputTools>
+              <PromptInputSubmit
+                status={busy ? "streaming" : "ready"}
+                className="rounded-full"
+              />
+            </PromptInputFooter>
           </PromptInput>
           <p className="mt-2 text-center text-[10px] uppercase tracking-wide text-muted-foreground">
             Cost cap $0.50 · CSV at /workspace/output/results.csv · 4-layer eval
