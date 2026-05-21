@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { exceedsCap, MAX_USD_PER_RUN, usdFromUsage } from "../../lib/cost";
 
 describe("cost", () => {
-  it("MAX_USD_PER_RUN is 0.5", () => {
-    expect(MAX_USD_PER_RUN).toBe(0.5);
+  it("MAX_USD_PER_RUN is 1.0", () => {
+    expect(MAX_USD_PER_RUN).toBe(1.0);
   });
 
   it("usdFromUsage prices input+output at Sonnet 4.6 rates", () => {
@@ -24,8 +24,8 @@ describe("cost", () => {
   });
 
   it("exceedsCap triggers at or above the cap", () => {
-    expect(exceedsCap(0.49)).toBe(false);
-    expect(exceedsCap(0.5)).toBe(true);
+    expect(exceedsCap(0.99)).toBe(false);
     expect(exceedsCap(1.0)).toBe(true);
+    expect(exceedsCap(1.5)).toBe(true);
   });
 });

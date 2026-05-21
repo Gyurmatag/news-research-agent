@@ -103,7 +103,7 @@ export function RunMessage({
             </span>
             {snapshot.message ? ` — ${snapshot.message}` : ""}
           </span>
-          <CostPill totalUsd={snapshot.totalUsd} capUsd={0.5} />
+          <CostPill totalUsd={snapshot.totalUsd} capUsd={1.0} />
         </div>
       </MessageContent>
     </Message>

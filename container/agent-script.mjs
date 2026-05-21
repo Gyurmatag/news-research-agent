@@ -26,7 +26,7 @@ const RUN_ID = process.env.RUN_ID ?? "unknown";
 const USER_QUERY = process.env.USER_QUERY ?? "";
 const MCP_ENABLED = (process.env.MCP_ENABLED ?? "true").toLowerCase() === "true";
 const AGENT_MODEL = process.env.AGENT_MODEL ?? "claude-sonnet-4-6";
-const MAX_USD_PER_RUN = Number.parseFloat(process.env.MAX_USD_PER_RUN ?? "0.5");
+const MAX_USD_PER_RUN = Number.parseFloat(process.env.MAX_USD_PER_RUN ?? "1.0");
 const OUTPUT_PATH = "/workspace/output/results.csv";
 const REQUIRED_COLUMNS = ["title", "source", "url", "date", "summary"];
 

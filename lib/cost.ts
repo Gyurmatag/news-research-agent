@@ -1,4 +1,4 @@
-export const MAX_USD_PER_RUN = 0.5;
+export const MAX_USD_PER_RUN = 1.0;
 
 // Sonnet 4.6 pricing per million tokens.
 const SONNET_INPUT_USD_PER_MTOK = 3;

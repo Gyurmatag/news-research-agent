@@ -28,7 +28,7 @@ Lightweight agentic automation platform: a journalist or analyst pastes a resear
 
 ## Cost cap
 
-`$0.50` per run, enforced both in the agent script and defense-in-depth in the DO.
+`$1.00` per run, enforced both in the agent script and defense-in-depth in the DO.
 
 ## Local dev
 

@@ -208,7 +208,7 @@ function ChatInner() {
             </PromptInputFooter>
           </PromptInput>
           <p className="mt-2 text-center text-[10px] uppercase tracking-wide text-muted-foreground">
-            Cost cap $0.50 · CSV at /workspace/output/results.csv · 4-layer eval
+            Cost cap $1.00 · CSV at /workspace/output/results.csv · 4-layer eval
           </p>
         </div>
       </div>
