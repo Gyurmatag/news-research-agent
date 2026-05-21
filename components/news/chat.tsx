@@ -20,6 +20,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import type { UIPart } from "@/lib/stream-protocol";
+import type { EvalSummary } from "@/lib/agent-events";
 import { emptySnapshot, reduceParts, type RunSnapshot } from "./timeline";
 import { RunMessage } from "./run-message";
 import { SuggestedPrompts } from "./suggested-prompts";
@@ -60,6 +61,16 @@ function ChatInner() {
     );
   }, []);
 
+  const setEvalSummary = useCallback((runId: string, summary: EvalSummary) => {
+    setExchangesRef.current((prev) =>
+      prev.map((e) =>
+        e.runId === runId
+          ? { ...e, snapshot: { ...e.snapshot, evalSummary: summary } }
+          : e,
+      ),
+    );
+  }, []);
+
   const submitQuery = useCallback(
     async (query: string, mcp: boolean) => {
       if (!query.trim() || busy) return;
@@ -82,7 +93,12 @@ function ChatInner() {
           snapshot: { ...emptySnapshot(), status: "running" },
         };
         setExchangesRef.current((prev) => [...prev, newExchange]);
-        startSse(data.runId, handlePartsForRun, () => setBusy(false));
+        startSse(data.runId, handlePartsForRun, () => {
+          setBusy(false);
+          // Polling fallback: if the SSE closed before the eval arrived,
+          // poll /api/runs/:id/eval for up to ~3 minutes.
+          pollEvalUntilReady(data.runId, setEvalSummary);
+        });
         controller.textInput.clear();
       } catch (err) {
         setExchangesRef.current((prev) => [
@@ -232,4 +248,36 @@ function startSse(
       onDone();
     }
   };
+}
+
+type EvalEndpointResponse =
+  | { status: "pending" }
+  | (EvalSummary & { status: "ready" });
+
+async function pollEvalUntilReady(
+  runId: string,
+  onReady: (runId: string, summary: EvalSummary) => void,
+  opts: { intervalMs?: number; maxMs?: number } = {},
+) {
+  const intervalMs = opts.intervalMs ?? 3000;
+  const maxMs = opts.maxMs ?? 3 * 60_000;
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try {
+      const res = await fetch(`/api/runs/${runId}/eval`, { cache: "no-store" });
+      if (res.ok) {
+        const body = (await res.json()) as EvalEndpointResponse;
+        if ("status" in body && body.status === "ready") {
+          // Strip the wrapper status field; the EvalSummary shape lives alongside.
+          const { status: _ignored, ...summary } = body;
+          void _ignored;
+          onReady(runId, summary as unknown as EvalSummary);
+          return;
+        }
+      }
+    } catch {
+      // network blip; keep polling
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 }

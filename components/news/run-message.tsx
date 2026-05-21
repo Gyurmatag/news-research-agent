@@ -11,6 +11,8 @@ import { EvalVerdictCard } from "./eval-verdict-card";
 import { CostPill } from "./cost-pill";
 import { CsvPreview } from "./csv-preview";
 import type { RunSnapshot } from "./timeline";
+import { Card, CardContent } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 
 const TOOL_STATE_MAP = {
   "input-streaming": "input-streaming",
@@ -70,7 +72,18 @@ export function RunMessage({
 
         {showCsv && <CsvPreview runId={runId} ready={hasOutput} />}
 
-        {snapshot.evalSummary && <EvalVerdictCard summary={snapshot.evalSummary} />}
+        {snapshot.evalSummary ? (
+          <EvalVerdictCard summary={snapshot.evalSummary} />
+        ) : (
+          (snapshot.status === "completed" || snapshot.status === "aborted") && (
+            <Card className="border-muted bg-muted/30">
+              <CardContent className="flex items-center gap-3 py-3 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Running 4-layer evaluation (schema · content · tool trace · LLM judge)…
+              </CardContent>
+            </Card>
+          )
+        )}
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
