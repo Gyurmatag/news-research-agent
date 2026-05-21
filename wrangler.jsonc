@@ -17,14 +17,14 @@
       "class_name": "AgentSandbox",
       "image": "./container/Dockerfile",
       "max_instances": 20,
-      "instance_type": "standard"
+      "instance_type": "standard-1"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "news-research-agent-db",
-      "database_id": "REPLACE_WITH_D1_ID",
+      "database_id": "ed0e385b-377d-4b8e-bfcc-f49486d0e4cd",
       "migrations_dir": "drizzle/migrations/d1"
     }
   ],
