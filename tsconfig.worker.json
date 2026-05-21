@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types", "node"],
+    "lib": ["esnext", "webworker"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "lib/**/*.ts",
+    "drizzle/**/*.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "container", ".next", ".open-next", "tests"]
+}
