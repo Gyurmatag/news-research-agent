@@ -14,3 +14,4 @@ test-results/
 *.log
 .turbo/
 tsconfig.tsbuildinfo
+tsconfig.*.tsbuildinfo
