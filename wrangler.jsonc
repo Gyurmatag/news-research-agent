@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "news-research-agent",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "AGENT_SANDBOX", "class_name": "AgentSandbox" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgentSandbox"] }
+  ],
+  "containers": [
+    {
+      "class_name": "AgentSandbox",
+      "image": "./container/Dockerfile",
+      "max_instances": 20,
+      "instance_type": "standard"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "news-research-agent-db",
+      "database_id": "REPLACE_WITH_D1_ID",
+      "migrations_dir": "drizzle/migrations/d1"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "RESULTS", "bucket_name": "news-research-agent-outputs" }
+  ],
+  "vars": {
+    "AGENT_MODEL": "claude-sonnet-4-6",
+    "JUDGE_MODEL": "gpt-5.5"
+  }
+}
